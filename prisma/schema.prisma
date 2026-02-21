@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Theater {
+  id              String            @id @default(uuid())
+  slug            String            @unique
+  name            String
+  location        String
+  parkingEnabled  Boolean           @default(true) @map("parking_enabled")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  settings        TheaterSettings?
+  priceRules      PriceRule[]
+  bookings        Booking[]
+  users           User[]
+
+  @@map("theaters")
+}
+
+model TheaterSettings {
+  id                   String   @id @default(uuid())
+  theaterId            String   @unique @map("theater_id")
+  maxAdvanceDays       Int      @default(7) @map("max_advance_days")
+  defaultDurationMins  Int      @default(180) @map("default_duration_mins")
+  entryBufferMins      Int      @default(15) @map("entry_buffer_mins")
+  gracePeriodMins      Int      @default(10) @map("grace_period_mins")
+  defaultFallbackPrice Decimal  @default(50.00) @map("default_fallback_price") @db.Decimal(10, 2)
+  theater              Theater  @relation(fields: [theaterId], references: [id], onDelete: Cascade)
+
+  @@map("theater_settings")
+}
+
+enum VehicleType {
+  TWO_WHEELER  @map("2W")
+  FOUR_WHEELER @map("4W")
+
+  @@map("vehicle_type")
+}
+
+enum RuleStatus {
+  ACTIVE
+  DISABLED
+
+  @@map("rule_status")
+}
+
+model PriceRule {
+  id          String      @id @default(uuid())
+  theaterId   String      @map("theater_id")
+  ruleName    String      @map("rule_name")
+  vehicleType VehicleType @map("vehicle_type")
+  price       Decimal     @db.Decimal(10, 2)
+  validDays   Json        @map("valid_days") // ["MON","TUE"] or ["SAT","SUN"] or ["WEEKDAYS"] or ["WEEKENDS"] or ["ALL"]
+  timeFrom    String?     @map("time_from") // "17:00" format
+  timeTo      String?     @map("time_to") // "22:00" format
+  priority    Int         @default(1)
+  status      RuleStatus  @default(ACTIVE)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  theater     Theater     @relation(fields: [theaterId], references: [id], onDelete: Cascade)
+  bookings    Booking[]
+
+  @@index([theaterId, vehicleType, status])
+  @@map("price_rules")
+}
+
+enum BookingType {
+  WALKIN
+  SCHEDULED
+
+  @@map("booking_type")
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+
+  @@map("payment_status")
+}
+
+model Booking {
+  id                String        @id @default(uuid())
+  theaterId         String        @map("theater_id")
+  bookingType       BookingType   @map("booking_type")
+  vehicleNumber     String        @map("vehicle_number")
+  vehicleType       VehicleType   @map("vehicle_type")
+  selectedEntryAt   DateTime      @map("selected_entry_at")
+  expiryAt          DateTime      @map("expiry_at")
+  appliedRuleId     String?       @map("applied_rule_id")
+  amountPaid        Decimal       @db.Decimal(10, 2) @map("amount_paid")
+  paymentStatus     PaymentStatus @default(PENDING) @map("payment_status")
+  razorpayOrderId   String?       @map("razorpay_order_id")
+  razorpayPaymentId String?       @map("razorpay_payment_id")
+  qrToken           String?       @map("qr_token") @db.Text
+  qrUsed            Boolean       @default(false) @map("qr_used")
+  qrUsedAt          DateTime?     @map("qr_used_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  theater           Theater       @relation(fields: [theaterId], references: [id], onDelete: Cascade)
+  appliedRule       PriceRule?    @relation(fields: [appliedRuleId], references: [id], onDelete: SetNull)
+  scanLogs          ScanLog[]
+
+  @@index([theaterId, createdAt])
+  @@index([vehicleNumber])
+  @@index([razorpayOrderId])
+  @@map("bookings")
+}
+
+enum ScanResult {
+  VALID
+  EXPIRED
+  USED
+  INVALID
+  THEATER_MISMATCH
+  TOO_EARLY
+
+  @@map("scan_result")
+}
+
+model ScanLog {
+  id         String     @id @default(uuid())
+  bookingId  String     @map("booking_id")
+  staffId    String     @map("staff_id")
+  scanResult ScanResult @map("scan_result")
+  scannedAt  DateTime   @default(now()) @map("scanned_at")
+  booking    Booking    @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  staff      User       @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+  @@index([staffId, scannedAt])
+  @@map("scan_logs")
+}
+
+enum UserRole {
+  ADMIN
+  STAFF
+
+  @@map("user_role")
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+
+  @@map("user_status")
+}
+
+model User {
+  id           String     @id @default(uuid())
+  theaterId    String     @map("theater_id")
+  name         String
+  mobile       String?
+  email        String?
+  passwordHash String     @map("password_hash")
+  role         UserRole
+  pin          String?    @db.VarChar(6)
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  theater      Theater    @relation(fields: [theaterId], references: [id], onDelete: Cascade)
+  scanLogs     ScanLog[]
+
+  @@unique([theaterId, email])
+  @@index([theaterId, role])
+  @@map("users")
+}
